@@ -1,0 +1,82 @@
+version: '3.8'
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - app_network
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility, compute]
+          memory: 4G
+          cpus: '3.5'
+        limits:
+          memory: 5G
+          cpus: '4'
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    cpu_count: 4
+    cpu_percent: 100
+    mem_limit: 5G
+    mem_reservation: 4G
+    shm_size: '2gb'
+    restart: allways
+    init: true
+    healthcheck:
+      test: ["CMD", "/bin/ollama", "list"]
+      /interval: 10s
+      timeout: 5s
+      retries: 5
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    volumes:
+      - open-webui:/app/backend/data
+    ports:
+      - "8080:8080"
+    environment:
+      - OLLAMA_API_BASE_URL=http://ollama:11434
+      - OLLAMA_BASE_URL=http://ollama:11434
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+    networks:
+      - app_network
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: allways
+    init: true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  app_network:
+    name: ollama_network
+    driver: bridge
+
+volumes:
+  ollama:
+    name: ollama
+  open-webui:
+    name: open-webui
+
