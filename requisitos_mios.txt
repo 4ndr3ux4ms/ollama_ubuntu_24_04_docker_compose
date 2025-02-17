@@ -1,0 +1,189 @@
+
+
+------------------------------------------------------------------------------------------------------
+modificar /etc/resolv.conf primero eliminar como sudo rm /etc/resolv.conf, luego cear de nuevo  /etc/resolv.conf  y colocar dentro "nameserver 8.8.8.8
+nameserver 8.8.4.4" luego dejarlo inmutable con chattr +i , reinciar la red o el servido de dns para tener red de nuevo lo que haga falta luego del cambio probar si hay ping a google para seguir con el playbook o indicarlo en un mensaje de error
+------------------------------------------------------------------------------------------------------
+
+modificar /etc/dnf/dnf.confdejarlo con este conetenido:
+"
+# Mod con ansible
+
+[main] 
+gpgcheck=1 
+installonly_limit=3 
+clean_requirements_on_remove=True 
+best=False 
+skip_if_unavailable=True 
+max_parallel_downloads=10 
+fastestmirror=True
+
+"
+
+------------------------------------------------------------------------------------------------------
+actualizar sistema: sudo dnf group upgrade core
+sudo dnf4 group update core
+sudo dnf -y update
+
+------------------------------------------------------------------------------------------------------
+
+instalar Flatpak: "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
+
+------------------------------------------------------------------------------------------------------
+
+configuraciones adicionales kernel: "sudo grubby --update-kernel=ALL --args="mitigations=off"
+
+------------------------------------------------------------------------------------------------------
+luego sumar esto al playbook : H/W Video Decoding with VA-API: "
+sudo dnf install ffmpeg-libs libva libva-utils
+sudo dnf swap libva-intel-media-driver intel-media-driver --allowerasing
+sudo dnf install libva-intel-driver
+"
+
+------------------------------------------------------------------------------------------------------
+instalar Media Codecs: "sudo dnf swap 'ffmpeg-free' 'ffmpeg' --allowerasing # Switch to full FFMPEG.
+sudo dnf4 group upgrade multimedia
+sudo dnf upgrade @multimedia --setopt="install_weak_deps=False" --exclude=PackageKit-gstreamer-plugin # Installs gstreamer components. Required if you use Gnome Videos and other dependent applications.
+sudo dnf group install -y sound-and-video # Installs useful Sound and Video complement packages."
+
+
+------------------------------------------------------------------------------------------------------
+update firmware: "sudo fwupdmgr refresh --force
+sudo fwupdmgr get-devices # Lists devices with available updates.
+sudo fwupdmgr get-updates # Fetches list of available updates.
+sudo fwupdmgr update"
+
+------------------------------------------------------------------------------------------------------
+instalar repositorios sumar a playbook de ansible: "sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm ""
+
+------------------------------------------------------------------------------------------------------
+instalacion de Ohmyzsh y Powerlevel10k (adaptar este codigo a fedora 41) : "---
+  - name: Setup RH/Centos Systems
+    hosts: localhost
+    tasks:
+    - name: Install zsh
+      ansible.builtin.package:
+        name: zsh
+        state: present
+      become: true
+
+    - name: Set user shell to zsh
+      ansible.builtin.user:
+        name: "{{ user }}"
+        shell: /bin/zsh
+      become: true
+
+    - name: Download ohmyzsh
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
+        dest: "/home/{{ user }}/install.sh"
+        mode: '0755'
+
+    - name: Install ohmyzsh
+      ansible.builtin.script:
+        cmd: "/home/{{ user }}/install.sh"
+
+    - name: Install PowerLevel10K
+      ansible.builtin.git:
+        repo: https://github.com/romkatv/powerlevel10k.git
+        dest: "/home/{{ user }}/.oh-my-zsh/custom/themes/powerlevel10k"
+        depth: 1
+
+    - name: Download NerdFonts
+      ansible.builtin.get_url:
+        url: https://github.com/ryanoasis/nerd-fonts/releases/download/v2.3.3/Meslo.zip
+        dest: "/home/{{ user }}/Meslo.zip"
+
+    - name: Create temp directory
+      ansible.builtin.file:
+        path: "/home/{{ user }}/Meslo"
+        state: directory
+        mode: '0755'
+
+    - name: Install font files
+      ansible.builtin.unarchive:
+        src: "/home/{{ user }}/Meslo.zip"
+        dest: "/home/{{ user }}/Meslo"
+
+    - name: Move font files to fonts directory
+      ansible.builtin.copy:
+        src: "/home/{{ user }}/Meslo"
+        dest: /usr/share/fonts/Meslo
+        owner: root
+      become: true
+
+    - name: Update .zshrc
+      ansible.builtin.lineinfile:
+        path: "/home/{{ user }}/.zshrc"
+        insertafter: EOF
+        line: "source /home/{{ user }}/.oh-my-zsh/custom/themes/powerlevel10k/powerlevel10k.zsh-theme"" 
+
+------------------------------------------------------------------------------------------------------
+crear perfil y alias para chorme adaptar tutorial al playbook ": Ejecutar Instancias Separadas de Chrome con Parámetros
+Si prefieres mantener sesiones completamente separadas (sin compartir memoria caché ni configuraciones), puedes lanzar Chrome con perfiles específicos desde la línea de comandos.
+
+Pasos:
+Crear Carpetas de Datos para Cada Cuenta:
+
+Abre una terminal y crea carpetas para almacenar los datos de usuario:
+bash
+Copy
+Edit
+mkdir -p ~/chrome_personal
+mkdir -p ~/chrome_trabajo
+Lanzar Chrome con Perfiles Distintos:
+
+Para la cuenta personal:
+bash
+Copy
+Edit
+google-chrome --user-data-dir=/home/andres/chrome_personal
+Para la cuenta laboral:
+bash
+Copy
+Edit
+google-chrome --user-data-dir=/home/andres/chrome_trabajo
+Atajos para Comodidad:
+
+Crea atajos en el escritorio o un alias en tu terminal para facilitar el acceso:
+bash
+Copy
+Edit
+alias chrome-personal='google-chrome --user-data-dir=/home/andres/chrome_personal'
+alias chrome-trabajo='google-chrome --user-data-dir=/home/andres/chrome_trabajo'
+Abrir Ambas Instancias:
+
+Abre una terminal y ejecuta ambos alias o comandos."
+
+------------------------------------------------------------------------------------------------------
+
+installar apps con sudo dnf install:
+unzip 
+p7zip 
+p7zip-plugins 
+unrar remmina 
+transmission-qt 
+google-chrome
+terminator
+vlc
+
+instalar apps de flaptak, aplication ID:
+com.github.muriloventuroso.easyssh
+com.github.tenderowl.frog
+com.rtosta.zapzap
+io.github.subhra74.Muon
+md.obsidian.Obsidian
+------------------------------------------------------------------------------------------------------
+
+instalar Virt Manager:
+sudo dnf install @virtualization
+
+------------------------------------------------------------------------------------------------------
+instalar sublime text: 
+Install the GPG key:
+sudo rpm -v --import https://download.sublimetext.com/sublimehq-rpm-pub.gpg
+Stable for Fedora 41/dnf5 or newer:
+sudo dnf config-manager addrepo --from-repofile=https://download.sublimetext.com/rpm/stable/x86_64/sublime-text.repo
+sudo dnf install sublime-text
+
+------------------------------------------------------------------------------------------------------
