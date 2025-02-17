@@ -1,0 +1,384 @@
+---
+- name: Fedora 41 Post-Installation Setup
+  hosts: all
+  vars:
+    user: "admin"
+    user_home: "/home/{{ user }}"
+    dnf_packages:
+      - unzip
+      - p7zip
+      - p7zip-plugins
+      - unrar
+      - remmina
+      - transmission-qt
+      - terminator
+      - vlc
+      - libva
+      - libva-utils
+      - libva-intel-driver
+      - git
+    flatpak_packages:
+      - com.github.muriloventuroso.easyssh
+      - com.github.tenderowl.frog
+      - com.rtosta.zapzap
+      - io.github.subhra74.Muon
+      - md.obsidian.Obsidian
+
+  handlers:
+    - name: restart NetworkManager
+      ansible.builtin.service:
+        name: NetworkManager
+        state: restarted
+      become: true
+
+    - name: update grub
+      ansible.builtin.command: grub2-mkconfig -o /boot/grub2/grub.cfg
+      become: true
+
+  tasks:
+    - name: Configure DNS settings
+      block:
+        - name: Check if systemd-resolved is active
+          ansible.builtin.command: systemctl is-active systemd-resolved
+          register: resolved_status
+          changed_when: false
+          failed_when: false
+
+        - name: Stop and disable systemd-resolved if active
+          ansible.builtin.systemd:
+            name: systemd-resolved
+            state: stopped
+            enabled: false
+          become: true
+          when: resolved_status.rc == 0
+
+        - name: Remove immutable attribute if exists
+          ansible.builtin.command: chattr -i /etc/resolv.conf
+          become: true
+          failed_when: false
+          changed_when: false
+
+        - name: Remove existing resolv.conf
+          ansible.builtin.file:
+            path: /etc/resolv.conf
+            state: absent
+          become: true
+          failed_when: false
+
+        - name: Create new resolv.conf
+          ansible.builtin.copy:
+            content: |
+              nameserver 8.8.8.8
+              nameserver 8.8.4.4
+            dest: /etc/resolv.conf
+            mode: '0644'
+          become: true
+
+        - name: Make resolv.conf immutable
+          ansible.builtin.command: chattr +i /etc/resolv.conf
+          become: true
+      notify: restart NetworkManager
+
+    - name: Verify DNS configuration
+      ansible.builtin.command: ping -c 1 google.com
+      register: ping_result
+      changed_when: false
+      failed_when: ping_result.rc != 0
+      ignore_errors: true
+
+    - name: Display DNS status
+      ansible.builtin.debug:
+        msg: "DNS configuration is working correctly"
+      when: ping_result.rc == 0
+
+    - name: Configure DNF settings
+      ansible.builtin.copy:
+        content: |
+          [main]
+          gpgcheck=1
+          installonly_limit=3
+          clean_requirements_on_remove=True
+          best=False
+          skip_if_unavailable=True
+          max_parallel_downloads=10
+          fastestmirror=True
+        dest: /etc/dnf/dnf.conf
+        mode: '0644'
+      become: true
+
+    - name: Install RPM Fusion repositories
+      block:
+        - name: Import RPM Fusion free key
+          ansible.builtin.rpm_key:
+            key: https://rpmfusion.org/keys?action=AttachFile&do=get&target=RPM-GPG-KEY-rpmfusion-free-fedora-2020
+            state: present
+          become: true
+
+        - name: Import RPM Fusion nonfree key
+          ansible.builtin.rpm_key:
+            key: https://rpmfusion.org/keys?action=AttachFile&do=get&target=RPM-GPG-KEY-rpmfusion-nonfree-fedora-2020
+            state: present
+          become: true
+
+        - name: Install RPM Fusion repositories
+          ansible.builtin.dnf:
+            name: 
+              - "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-{{ ansible_distribution_major_version }}.noarch.rpm"
+              - "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-{{ ansible_distribution_major_version }}.noarch.rpm"
+            state: present
+            disable_gpg_check: true
+          become: true
+
+        - name: Verify RPM Fusion installation
+          ansible.builtin.command: dnf repository-packages rpmfusion-free list
+          register: rpmfusion_check
+          changed_when: false
+          failed_when: false
+          become: true
+
+        - name: Display RPM Fusion status
+          ansible.builtin.debug:
+            msg: "RPM Fusion repositories installed successfully"
+          when: rpmfusion_check.rc == 0
+
+    - name: Update core system
+      ansible.builtin.dnf:
+        name: "@core"
+        state: latest
+      become: true
+
+    - name: Install Google Chrome
+      block:
+        - name: Import Google Chrome GPG key
+          ansible.builtin.rpm_key:
+            key: https://dl.google.com/linux/linux_signing_key.pub
+            state: present
+          become: true
+
+        - name: Add Google Chrome repository
+          ansible.builtin.yum_repository:
+            name: google-chrome
+            description: Google Chrome Repository
+            baseurl: http://dl.google.com/linux/chrome/rpm/stable/x86_64
+            enabled: true
+            gpgcheck: true
+            gpgkey: https://dl.google.com/linux/linux_signing_key.pub
+          become: true
+
+        - name: Install Google Chrome
+          ansible.builtin.dnf:
+            name: google-chrome-stable
+            state: present
+          become: true
+
+    - name: Handle multimedia packages transition
+      block:
+        - name: Remove FFmpeg free packages
+          ansible.builtin.dnf:
+            name:
+              - ffmpeg-free
+              - libavcodec-free
+              - libavdevice-free
+              - libavfilter-free
+              - libavformat-free
+              - libavutil-free
+              - libpostproc-free
+              - libswresample-free
+              - libswscale-free
+            state: absent
+            allowerasing: true
+          become: true
+
+        - name: Install FFmpeg from RPM Fusion
+          ansible.builtin.dnf:
+            name: ffmpeg
+            state: present
+            allowerasing: true
+          become: true
+
+    - name: Install system packages
+      ansible.builtin.dnf:
+        name: "{{ item }}"
+        state: latest
+      loop: "{{ dnf_packages | difference(['google-chrome']) }}"
+      become: true
+
+    - name: Configure Flatpak
+      block:
+        - name: Check if Flathub is already configured
+          ansible.builtin.command: flatpak remotes
+          register: flatpak_remotes
+          changed_when: false
+          failed_when: false
+          become: true
+
+        - name: Add Flathub repository
+          ansible.builtin.command: flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          when: "'flathub' not in flatpak_remotes.stdout"
+          async: 60
+          poll: 5
+          register: flathub_add
+          become: true
+
+        - name: Install Flatpak applications
+          ansible.builtin.command: flatpak install -y flathub {{ item }}
+          loop: "{{ flatpak_packages }}"
+          async: 300
+          poll: 10
+          become: true
+      become: true
+
+    - name: Configure kernel parameters
+      ansible.builtin.command: grubby --update-kernel=ALL --args="mitigations=off"
+      become: true
+      notify: update grub
+
+    - name: Install and configure media codecs
+      block:
+        - name: Switch to full FFMPEG
+          ansible.builtin.dnf:
+            name: ffmpeg
+            state: present
+            allowerasing: true
+          become: true
+
+        - name: Upgrade multimedia group
+          ansible.builtin.dnf:
+            name: "@multimedia"
+            state: latest
+            install_weak_deps: false
+            exclude: PackageKit-gstreamer-plugin
+          become: true
+
+        - name: Install sound and video group
+          ansible.builtin.dnf:
+            name: "@sound-and-video"
+            state: present
+          become: true
+
+    - name: Install Virtualization
+      ansible.builtin.dnf:
+        name: "@virtualization"
+        state: present
+      become: true
+
+    - name: Install Sublime Text
+      block:
+        - name: Import Sublime Text GPG key
+          ansible.builtin.rpm_key:
+            key: https://download.sublimetext.com/sublimehq-rpm-pub.gpg
+            state: present
+          become: true
+
+        - name: Check if Sublime Text repo exists
+          ansible.builtin.stat:
+            path: /etc/yum.repos.d/sublime-text.repo
+          register: sublime_repo
+
+        - name: Add Sublime Text repository
+          ansible.builtin.command: dnf config-manager addrepo --from-repofile=https://download.sublimetext.com/rpm/stable/x86_64/sublime-text.repo
+          become: true
+          when: not sublime_repo.stat.exists
+
+        - name: Install Sublime Text package
+          ansible.builtin.dnf:
+            name: sublime-text
+            state: present
+          become: true
+
+    - name: Setup ZSH with Oh My Zsh and Powerlevel10k
+      block:
+        - name: Install ZSH
+          ansible.builtin.dnf:
+            name: zsh
+            state: present
+          become: true
+
+        - name: Set user shell to ZSH
+          ansible.builtin.user:
+            name: "{{ user }}"
+            shell: /bin/zsh
+          become: true
+
+        - name: Download Oh My Zsh installer
+          ansible.builtin.get_url:
+            url: https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
+            dest: "/home/{{ user }}/install.sh"
+            mode: '0755'
+
+        - name: Install Oh My Zsh
+          ansible.builtin.command: "/home/{{ user }}/install.sh --unattended"
+          args:
+            creates: "/home/{{ user }}/.oh-my-zsh"
+          become: true
+          become_user: "{{ user }}"
+          environment:
+            HOME: "/home/{{ user }}"
+            RUNZSH: "no"
+            CHSH: "no"
+          async: 300
+          poll: 10
+          register: oh_my_zsh_install
+
+        - name: Check Oh My Zsh installation
+          ansible.builtin.stat:
+            path: "/home/{{ user }}/.oh-my-zsh"
+          register: oh_my_zsh_check
+          failed_when: not oh_my_zsh_check.stat.exists
+
+        - name: Display Oh My Zsh installation status
+          ansible.builtin.debug:
+            msg: "Oh My Zsh installation {{ 'successful' if oh_my_zsh_check.stat.exists else 'failed' }}"
+
+        - name: Install Powerlevel10k theme
+          ansible.builtin.git:
+            repo: https://github.com/romkatv/powerlevel10k.git
+            dest: "/home/{{ user }}/.oh-my-zsh/custom/themes/powerlevel10k"
+            depth: 1
+
+        - name: Setup Meslo Nerd Font
+          block:
+            - name: Download Meslo Nerd Font
+              ansible.builtin.get_url:
+                url: https://github.com/ryanoasis/nerd-fonts/releases/download/v2.3.3/Meslo.zip
+                dest: "/home/{{ user }}/Meslo.zip"
+
+            - name: Create fonts directory
+              ansible.builtin.file:
+                path: /usr/share/fonts/Meslo
+                state: directory
+                mode: '0755'
+              become: true
+
+            - name: Extract and install fonts
+              ansible.builtin.unarchive:
+                src: "/home/{{ user }}/Meslo.zip"
+                dest: /usr/share/fonts/Meslo
+                remote_src: true
+              become: true
+
+        - name: Configure Powerlevel10k in .zshrc
+          ansible.builtin.lineinfile:
+            path: "/home/{{ user }}/.zshrc"
+            line: "source /home/{{ user }}/.oh-my-zsh/custom/themes/powerlevel10k/powerlevel10k.zsh-theme"
+            state: present
+
+    - name: Setup Chrome profiles
+      block:
+        - name: Create Chrome profile directories
+          ansible.builtin.file:
+            path: "/home/{{ user }}/{{ item }}"
+            state: directory
+            mode: '0755'
+          loop:
+            - chrome_personal
+            - chrome_trabajo
+
+        - name: Add Chrome profile aliases to .zshrc
+          ansible.builtin.blockinfile:
+            path: "/home/{{ user }}/.zshrc"
+            block: |
+              # Chrome profile aliases
+              alias chrome-personal='google-chrome --user-data-dir=/home/{{ user }}/chrome_personal'
+              alias chrome-trabajo='google-chrome --user-data-dir=/home/{{ user }}/chrome_trabajo'
+            marker: "# {mark} CHROME PROFILE ALIASES"
