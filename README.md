@@ -1,3 +1,5 @@
+cat ~/.zshrc 
+
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 # alias chrome-personal='google-chrome --user-data-dir=/home/admin/chrome_personal'
